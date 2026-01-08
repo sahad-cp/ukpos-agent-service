@@ -1,6 +1,3 @@
-
-
-
 package escpos
 
 import (
@@ -32,7 +29,7 @@ const (
 
 	// Size
 	// cmdDoubleHW = "\x1d!\x30"
-	cmdNormal   = "\x1d!\x00"
+	cmdNormal = "\x1d!\x00"
 
 	// Cut
 	cmdCut = "\x1dV\x42\x00"
@@ -45,11 +42,11 @@ const (
 	// Changed from \x30 (48) to \x40 (64 dots).
 	// This adds approx 16 more dots of spacing on the left.
 	// It pushes the content to the center, removing the extra space on the right.
-	cmdMarginLeft = "\x1dL\x32\x00"
+	cmdMarginLeft = "\x1dL\x22\x00"
 
 	// ✅ PRINTER WIDTH
 	// Kept at 42 to prevent "ED" wrapping.
-	printerWidth = 42
+	printerWidth = 47
 )
 
 /*
@@ -67,11 +64,11 @@ type ReceiptItem struct {
 
 type ReceiptData struct {
 	Outlet struct {
-		Name    string `json:"name"`
-		Email   string `json:"email"`
-		Phone   string `json:"phone"`
-		Address string `json:"address"`
-		GST     string `json:"gst"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		Phone      string `json:"phone"`
+		Address    string `json:"address"`
+		GST        string `json:"gst"`
 		LogoBase64 string `json:"logoBase64"`
 	} `json:"outlet"`
 
@@ -102,7 +99,6 @@ type ReceiptData struct {
 ════════════════════════════════════
 */
 
-
 func setLeftMargin(dots int) string {
 	low := byte(dots % 256)
 	high := byte(dots / 256)
@@ -116,11 +112,16 @@ func BuildReceipt(r ReceiptData) []byte {
 
 	// ✅ FIXED: Bold Solid Separator Line
 	// Using thick underline + spaces is cleaner than dashes ("-")
+	// separator := func() {
+	// 	b.WriteString(cmdAlignLeft) // Reset align to ensure line starts at margin
+	// 	b.WriteString(cmdUnderlineThick)
+	// 	b.WriteString(strings.Repeat("-", printerWidth))
+	// 	b.WriteString(cmdUnderlineOff + "\n")
+	// }
 	separator := func() {
-		b.WriteString(cmdAlignLeft) // Reset align to ensure line starts at margin
-		b.WriteString(cmdUnderlineThick)
+		b.WriteString(cmdAlignLeft)
 		b.WriteString(strings.Repeat("-", printerWidth))
-		b.WriteString(cmdUnderlineOff + "\n")
+		b.WriteString("\n")
 	}
 
 	// Print Key-Value (Left ...... Right)
@@ -134,14 +135,14 @@ func BuildReceipt(r ReceiptData) []byte {
 	}
 
 	// ---------- 1. INIT & MARGIN ----------
-	b.WriteString(cmdInit)
-	b.WriteString(cmdMarginLeft) // Sets the corrected global margin
+	// b.WriteString(cmdInit)
+	// b.WriteString(cmdMarginLeft) // Sets the corrected global margin
 
 	// ---------- 2. HEADER ----------
-	b.WriteString(cmdAlignCenter)
-	
+	// b.WriteString(cmdAlignCenter)
+
 	// Top greeting
-	b.WriteString("Thank you for dining with us!\n\n")
+	// b.WriteString("Thank you for dining with us!\n\n")
 
 	// [LOGO PLACEHOLDER]
 	// b.Write(logoBytes)
@@ -150,24 +151,30 @@ func BuildReceipt(r ReceiptData) []byte {
 		if logoBytes != nil {
 			// b.WriteString("\x1dL\x00\x00")
 
-			// b.WriteString("\x1dL\x8a\x00") 
-			b.WriteString(cmdAlignCenter) 
+			// b.WriteString("\x1dL\x8a\x00")
+			b.WriteString(cmdAlignCenter)
 			// 2. Print the image
 			b.Write(logoBytes)
 			b.WriteString("\n")
 
 			// 3. Restore the text margin settings immediately after
 			b.WriteString(cmdMarginLeft)
-			
+
 			// 4. Re-assert Center alignment for the text following the logo
-			// b.WriteString(cmdAlignCenter) 
+			// b.WriteString(cmdAlignCenter)
 		}
 	}
+	b.WriteString("\n")
+	b.WriteString(cmdInit)
+
+	// b.WriteString(cmdMarginLeft) 
+	// Sets the corrected global margin
+	b.WriteString(cmdAlignCenter)
 
 	// Outlet Name: Normal Size, Bold
-	b.WriteString(cmdNormal + cmdBoldOn) 
+	b.WriteString(cmdNormal + cmdBoldOn)
 	b.WriteString(r.Outlet.Name + "\n")
-	b.WriteString(cmdBoldOff) 
+	b.WriteString(cmdBoldOff)
 
 	// Contact Info
 	if r.Outlet.Email != "" {
@@ -177,7 +184,7 @@ func BuildReceipt(r ReceiptData) []byte {
 	if r.Outlet.GST != "" {
 		b.WriteString("GST: " + r.Outlet.GST + "\n")
 	}
-	b.WriteString("\n") 
+	b.WriteString("\n")
 
 	separator()
 
@@ -188,21 +195,21 @@ func BuildReceipt(r ReceiptData) []byte {
 	if r.TRN != "" {
 		b.WriteString("TRN: " + r.TRN + "\n")
 	}
-	
+
 	separator()
 
 	// ---------- 4. CUSTOMER INFO ----------
 	b.WriteString(cmdAlignCenter)
 	b.WriteString("Customer Info\n")
 	b.WriteString(r.Customer + "\n")
-	
+
 	separator()
 
 	// ---------- 5. ORDER DETAILS ----------
 	// printKV relies on printerWidth. Since we increased the margin,
 	// this block will now visually shift to the center.
 	printKV("Order Type", r.OrderType)
-	
+
 	if r.Table != "" {
 		printKV("Table", r.Table)
 	}
@@ -222,7 +229,7 @@ func BuildReceipt(r ReceiptData) []byte {
 
 		// Calculate Max Name Width
 		maxName := printerWidth - 4 - len(amt) - 1
-		
+
 		wrappedName := wrapText(it.Name, maxName)
 		lines := strings.Split(wrappedName, "\n")
 
@@ -250,7 +257,7 @@ func BuildReceipt(r ReceiptData) []byte {
 	// ---------- 8. TOTALS ----------
 	printKV("Sub Total", fmt.Sprintf("%.2f AED", r.Subtotal))
 	printKV(fmt.Sprintf("VAT (%.0f%%)", r.VATPercent), fmt.Sprintf("%.2f AED", r.VATAmount))
-	
+
 	if r.DeliveryCharge > 0 {
 		printKV("Delivery", fmt.Sprintf("%.2f AED", r.DeliveryCharge))
 	}
@@ -319,4 +326,6 @@ func wrapText(text string, width int) string {
 	}
 	return out.String()
 }
+
+
 

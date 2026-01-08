@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-
 // -------- DATA MODELS --------
 
 type KOTItem struct {
@@ -35,7 +34,7 @@ type KOTData struct {
 	} `json:"kot"`
 
 	Items []KOTItem `json:"items"`
-	Notes     string   `json:"notes"`
+	Notes string    `json:"notes"`
 }
 
 // -------- BUILDER --------
@@ -62,7 +61,7 @@ func BuildKOT(k KOTData) []byte {
 	b.WriteString("Phone: " + k.Order.Phone + "\n")
 
 	b.WriteString(line + "\n")
-b.WriteString("\n")
+	b.WriteString("\n")
 	// ---------- KOT META ----------
 	b.WriteString(cmdBoldOn)
 	b.WriteString("KOT : " + k.KOT.KotNo + "\n")
@@ -103,7 +102,6 @@ b.WriteString("\n")
 	b.WriteString("\n")
 	b.WriteString(cmdAlignCenter)
 	b.WriteString("KITCHEN COPY\n\n")
-
 
 	b.WriteString(cmdCut)
 
