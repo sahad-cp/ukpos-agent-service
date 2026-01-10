@@ -1,7 +1,7 @@
 
 {
   "outletId": "outlet-123",
-  "gatewayUrl": "ws://178.18.254.224:9078",
+  "gatewayUrl": "wss://agent.rootsys.in",
   "agentVersion": "2.0.0",
   "reconnectInterval": 5000,
   "heartbeatInterval": 30000,
