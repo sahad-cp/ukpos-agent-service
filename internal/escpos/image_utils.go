@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"image"
-	"image/color"
+	// "image/color"
 	_ "image/jpeg" // Register JPG decoder
 	_ "image/png"  // Register PNG decoder
 	"strings"
@@ -37,47 +37,116 @@ func ProcessBase64Logo(b64Str string) []byte {
 	return imageToRaster(img, 576)
 }
 
-
 func imageToRaster(img image.Image, paperWidth int) []byte {
 	bounds := img.Bounds()
 	imgW := bounds.Dx()
 	imgH := bounds.Dy()
 
-	// Resize image to max width (300)
+	// Target logo width (safe for 80mm printers)
 	targetW := 300
+	if targetW > paperWidth {
+		targetW = paperWidth
+	}
 	targetH := (imgH * targetW) / imgW
 
-	// Calculate padding
+	// Center horizontally
 	leftPad := (paperWidth - targetW) / 2
-
+	if leftPad < 0 {
+		leftPad = 0
+	}
 
 	byteWidth := (paperWidth + 7) / 8
 
 	var buf bytes.Buffer
-	buf.WriteString("\x1dv0\x00")
+
+	// GS v 0  (Raster bit image)
+	buf.Write([]byte{0x1D, 0x76, 0x30, 0x00})
 	buf.WriteByte(byte(byteWidth % 256))
 	buf.WriteByte(byte(byteWidth / 256))
 	buf.WriteByte(byte(targetH % 256))
 	buf.WriteByte(byte(targetH / 256))
 
 	for y := 0; y < targetH; y++ {
+		srcY := y * imgH / targetH
+
 		for xByte := 0; xByte < byteWidth; xByte++ {
-			var b byte
+			var outByte byte
+
 			for bit := 0; bit < 8; bit++ {
 				x := xByte*8 + bit
 
-				// Inside image region?
-				if x >= leftPad && x < leftPad+targetW {
-					srcX := (x - leftPad) * imgW / targetW
-					srcY := y * imgH / targetH
-					c := color.GrayModel.Convert(img.At(srcX, srcY)).(color.Gray)
-					if c.Y < 128 {
-						b |= 1 << (7 - bit)
-					}
+				// Outside printable area → white
+				if x < leftPad || x >= leftPad+targetW {
+					continue
+				}
+
+				srcX := (x - leftPad) * imgW / targetW
+
+				r, g, b, a := img.At(srcX, srcY).RGBA()
+
+				// Transparent pixels → white
+				if a < 0x8000 {
+					continue
+				}
+
+				// Convert to grayscale (ITU-R BT.601)
+				gray := (299*r + 587*g + 114*b) / 1000
+				gray8 := gray >> 8
+
+				// Thermal-friendly threshold
+				if gray8 < 180 {
+					outByte |= 1 << (7 - bit)
 				}
 			}
-			buf.WriteByte(b)
+
+			buf.WriteByte(outByte)
 		}
 	}
+
 	return buf.Bytes()
 }
+
+
+// func imageToRaster(img image.Image, paperWidth int) []byte {
+// 	bounds := img.Bounds()
+// 	imgW := bounds.Dx()
+// 	imgH := bounds.Dy()
+
+// 	// Resize image to max width (300)
+// 	targetW := 300
+// 	targetH := (imgH * targetW) / imgW
+
+// 	// Calculate padding
+// 	leftPad := (paperWidth - targetW) / 2
+
+
+// 	byteWidth := (paperWidth + 7) / 8
+
+// 	var buf bytes.Buffer
+// 	buf.WriteString("\x1dv0\x00")
+// 	buf.WriteByte(byte(byteWidth % 256))
+// 	buf.WriteByte(byte(byteWidth / 256))
+// 	buf.WriteByte(byte(targetH % 256))
+// 	buf.WriteByte(byte(targetH / 256))
+
+// 	for y := 0; y < targetH; y++ {
+// 		for xByte := 0; xByte < byteWidth; xByte++ {
+// 			var b byte
+// 			for bit := 0; bit < 8; bit++ {
+// 				x := xByte*8 + bit
+
+// 				// Inside image region?
+// 				if x >= leftPad && x < leftPad+targetW {
+// 					srcX := (x - leftPad) * imgW / targetW
+// 					srcY := y * imgH / targetH
+// 					c := color.GrayModel.Convert(img.At(srcX, srcY)).(color.Gray)
+// 					if c.Y < 128 {
+// 						b |= 1 << (7 - bit)
+// 					}
+// 				}
+// 			}
+// 			buf.WriteByte(b)
+// 		}
+// 	}
+// 	return buf.Bytes()
+// }

@@ -12,6 +12,8 @@ import (
 	ws "ukpos-agent/internal/websocket"
 )
 
+
+
 func Run(cfg *config.Config) {
 	for {
 		log.Println("🔌 Connecting to gateway...")
@@ -32,79 +34,105 @@ func Run(cfg *config.Config) {
 		})
 
 		ctx, cancel := context.WithCancel(context.Background())
+		restart := make(chan struct{})
+
+		// 🔁 Restart timer
+		go func() {
+			time.Sleep(2 * time.Minute)
+			log.Println("🔁 Scheduled agent restart")
+			close(restart)
+		}()
+
 		go heartbeat(ctx, client, cfg)
 
-		client.Listen(func(msg map[string]any) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Println("🔥 Panic recovered:", r)
+		// 🧠 WebSocket listener
+		go func() {
+			client.Listen(func(msg map[string]any) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Println("🔥 Panic recovered:", r)
+					}
+				}()
+
+				msgType, _ := msg["type"].(string)
+				if msgType == "PRINT_JOB" {
+					handlePrintJob(client, cfg, msg)
 				}
-			}()
+			})
 
-			msgType, _ := msg["type"].(string)
+			// If Listen exits → gateway disconnected
+			log.Println("⚠️ Gateway disconnected")
+			close(restart)
+		}()
 
-			switch msgType {
+		// ⛔ Block here until restart condition
+		<-restart
 
-			case "PRINT_JOB":
-				job := msg["job"].(map[string]any)
-
-				jobId := job["jobId"].(string)
-				ip := job["printerIP"].(string)
-				port := int(job["printerPort"].(float64))
-				jobType := job["jobType"].(string)
-
-				client.Send(map[string]any{
-					"type":   "JOB_STATUS",
-					"jobId": jobId,
-					"status": "PRINTING",
-				})
-
-				var data []byte
-
-				switch jobType {
-
-				case "TEST":
-					data = escpos.TestPrint(cfg.OutletID, ip)
-
-				case "KOT":
-					var kot escpos.KOTData
-					parse(job["data"], &kot)
-					data = escpos.BuildKOT(kot)
-
-				case "RECEIPT":
-					var rec escpos.ReceiptData
-					parse(job["data"], &rec)
-					data = escpos.BuildReceipt(rec)
-
-				default:
-					log.Println("❌ Unknown jobType:", jobType)
-					return
-				}
-
-				if err := printer.Send(ip, port, cfg.PrinterTimeout, data); err != nil {
-					client.Send(map[string]any{
-						"type":   "JOB_STATUS",
-						"jobId": jobId,
-						"status": "FAILED",
-						"error":  err.Error(),
-					})
-					log.Println("❌ Print failed:", err)
-				} else {
-					client.Send(map[string]any{
-						"type":   "JOB_STATUS",
-						"jobId": jobId,
-						"status": "COMPLETED",
-					})
-					log.Println("🖨️ Printed:", jobType)
-				}
-			}
-		})
-
-		log.Println("⚠️ Gateway disconnected")
 		cancel()
 		client.Close()
+
+		log.Println("♻️ Agent restarting...")
 	}
 }
+
+func handlePrintJob(
+	client *ws.Client,
+	cfg *config.Config,
+	msg map[string]any,
+) {
+	job := msg["job"].(map[string]any)
+
+	jobId := job["jobId"].(string)
+	ip := job["printerIP"].(string)
+	port := int(job["printerPort"].(float64))
+	jobType := job["jobType"].(string)
+
+	client.Send(map[string]any{
+		"type":   "JOB_STATUS",
+		"jobId": jobId,
+		"status": "PRINTING",
+	})
+
+	var data []byte
+
+	switch jobType {
+	case "TEST":
+		data = escpos.TestPrint(cfg.OutletID, ip)
+
+	case "KOT":
+		var kot escpos.KOTData
+		parse(job["data"], &kot)
+		data = escpos.BuildKOT(kot)
+
+	case "RECEIPT":
+		var rec escpos.ReceiptData
+		parse(job["data"], &rec)
+		data = escpos.BuildReceipt(rec)
+
+	default:
+		log.Println("❌ Unknown jobType:", jobType)
+		return
+	}
+
+	if err := printer.Send(ip, port, cfg.PrinterTimeout, data); err != nil {
+		client.Send(map[string]any{
+			"type":   "JOB_STATUS",
+			"jobId": jobId,
+			"status": "FAILED",
+			"error":  err.Error(),
+		})
+		log.Println("❌ Print failed:", err)
+	} else {
+		client.Send(map[string]any{
+			"type":   "JOB_STATUS",
+			"jobId": jobId,
+			"status": "COMPLETED",
+		})
+		log.Println("🖨️ Printed:", jobType)
+	}
+}
+
+
 
 func parse(src any, dst any) {
 	b, _ := json.Marshal(src)
@@ -127,19 +155,7 @@ func heartbeat(ctx context.Context, c *ws.Client, cfg *config.Config) {
 	}
 }
 
-// package agent
 
-// import (
-// 	"context"
-// 	"encoding/json"
-// 	"log"
-// 	"time"
-
-// 	"ukpos-agent/internal/config"
-// 	"ukpos-agent/internal/escpos"
-// 	"ukpos-agent/internal/printer"
-// 	ws "ukpos-agent/internal/websocket"
-// )
 
 // func Run(cfg *config.Config) {
 // 	for {
@@ -161,6 +177,7 @@ func heartbeat(ctx context.Context, c *ws.Client, cfg *config.Config) {
 // 		})
 
 // 		ctx, cancel := context.WithCancel(context.Background())
+		
 // 		go heartbeat(ctx, client, cfg)
 
 // 		client.Listen(func(msg map[string]any) {
@@ -184,13 +201,14 @@ func heartbeat(ctx context.Context, c *ws.Client, cfg *config.Config) {
 
 // 				client.Send(map[string]any{
 // 					"type":   "JOB_STATUS",
-// 					"jobId":  jobId,
+// 					"jobId": jobId,
 // 					"status": "PRINTING",
 // 				})
 
 // 				var data []byte
 
 // 				switch jobType {
+
 // 				case "TEST":
 // 					data = escpos.TestPrint(cfg.OutletID, ip)
 
@@ -209,58 +227,27 @@ func heartbeat(ctx context.Context, c *ws.Client, cfg *config.Config) {
 // 					return
 // 				}
 
-// 				// ✅ ENQUEUE INSTEAD OF DIRECT PRINT
-// 				printer.Enqueue(printer.PrintJob{
-// 					IP:      ip,
-// 					Port:    port,
-// 					Timeout: time.Duration(cfg.PrinterTimeout) * time.Millisecond,
-// 					Data:    data,
-// 					JobType: jobType,
-
-// 					OnSuccess: func() {
-// 						client.Send(map[string]any{
-// 							"type":   "JOB_STATUS",
-// 							"jobId":  jobId,
-// 							"status": "COMPLETED",
-// 						})
-// 					},
-
-// 					OnError: func(err error) {
-// 						client.Send(map[string]any{
-// 							"type":   "JOB_STATUS",
-// 							"jobId":  jobId,
-// 							"status": "FAILED",
-// 							"error":  err.Error(),
-// 						})
-// 					},
-// 				})
+// 				if err := printer.Send(ip, port, cfg.PrinterTimeout, data); err != nil {
+// 					client.Send(map[string]any{
+// 						"type":   "JOB_STATUS",
+// 						"jobId": jobId,
+// 						"status": "FAILED",
+// 						"error":  err.Error(),
+// 					})
+// 					log.Println("❌ Print failed:", err)
+// 				} else {
+// 					client.Send(map[string]any{
+// 						"type":   "JOB_STATUS",
+// 						"jobId": jobId,
+// 						"status": "COMPLETED",
+// 					})
+// 					log.Println("🖨️ Printed:", jobType)
+// 				}
 // 			}
 // 		})
 
 // 		log.Println("⚠️ Gateway disconnected")
 // 		cancel()
 // 		client.Close()
-// 	}
-// }
-
-// func parse(src any, dst any) {
-// 	b, _ := json.Marshal(src)
-// 	_ = json.Unmarshal(b, dst)
-// }
-
-// func heartbeat(ctx context.Context, c *ws.Client, cfg *config.Config) {
-// 	ticker := time.NewTicker(
-// 		time.Duration(cfg.HeartbeatInterval) * time.Millisecond,
-// 	)
-// 	defer ticker.Stop()
-
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			log.Println("💔 Heartbeat stopped")
-// 			return
-// 		case <-ticker.C:
-// 			c.Send(map[string]any{"type": "HEARTBEAT"})
-// 		}
 // 	}
 // }
